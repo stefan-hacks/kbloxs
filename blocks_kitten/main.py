@@ -314,7 +314,7 @@ class TableDetector:
 
 
 class BlockRenderer:
-    """Renders blocks and tables in the terminal with Nushell-like styling"""
+    """Renders tables in pure Nushell style"""
     
     def __init__(self, screen_width: int = 80):
         self.update_width(screen_width)
@@ -324,12 +324,9 @@ class BlockRenderer:
         self.screen_width = max(20, width)  # Minimum width
         
     def render_block(self, block: Block) -> str:
-        """Render output in Nushell style (table only, no wrapper block)"""
-        result = []
-        
-        # Output directly in Nushell table format
+        """Render output in Nushell style (table only, no wrapper)"""
+        # For tables, render as pure Nushell table (no wrapper block)
         if block.is_table and block.table_data and block.table_headers:
-            # Render table in pure Nushell style
             table_lines = self.render_table(block.table_headers, block.table_data)
             return '\n'.join(table_lines)
         else:
@@ -337,7 +334,16 @@ class BlockRenderer:
             return block.output
     
     def render_table(self, headers: List[str], rows: List[List[str]]) -> List[str]:
-        """Render a table in pure Nushell format with exact box-drawing characters"""
+        """Render a table in pure Nushell format with exact box-drawing characters
+        
+        Nushell table format:
+        ╭────┬──────────┬──────┬─────────┬───────────────╮
+        │ #  │   name   │ type │  size   │   modified    │
+        ├────┼──────────┼──────┼─────────┼───────────────┤
+        │  0 │ .cargo   │ dir  │     0 B │ 9 minutes ago │
+        │  1 │ assets   │ dir  │     0 B │ 2 weeks ago   │
+        ╰────┴──────────┴──────┴─────────┴───────────────╯
+        """
         if not headers or not rows:
             return []
         
@@ -368,7 +374,7 @@ class BlockRenderer:
             if total_count > 0 and numeric_count / total_count > 0.7:
                 is_numeric_col[col_idx] = True
         
-        # Calculate column widths based on content (minimum 1 space padding on each side)
+        # Calculate column widths based on content
         col_widths = []
         for col_idx in range(num_cols):
             max_width = len(indexed_headers[col_idx])
@@ -381,25 +387,22 @@ class BlockRenderer:
         
         # Top border: ╭─┬─┬─╮ (Nushell style)
         border_parts = []
-        for i, w in enumerate(col_widths):
-            border_parts.append("─" * w)
-        top_border = "╭─" + "─┬─".join(border_parts) + "─╮"
+        for w in col_widths:
+            border_parts.append("─" * (w + 2))  # +2 for padding spaces
+        top_border = "╭" + "┬".join(border_parts) + "╮"
         result.append(Colors.colorize(top_border, Colors.BRIGHT_BLACK))
         
-        # Render header row (Nushell style: green bold)
+        # Header row: │ # │ name │ ... │
         header_parts = []
         for i, header in enumerate(indexed_headers):
             header_text = str(header)
             if len(header_text) > col_widths[i]:
                 header_text = header_text[:col_widths[i]]
             
-            # Right-align numeric columns, left-align others
-            if is_numeric_col[i]:
-                header_padded = header_text.rjust(col_widths[i])
-            else:
-                header_padded = header_text.ljust(col_widths[i])
+            # Right-align numeric columns, left-align others (but center headers)
+            header_padded = header_text.center(col_widths[i])
             
-            # Green bold headers (like Nushell)
+            # Color headers - green for all (Nushell style)
             header_colored = Colors.colorize(Colors.bold(header_padded), Colors.BRIGHT_GREEN)
             header_parts.append(header_colored)
         
@@ -408,29 +411,30 @@ class BlockRenderer:
         
         # Middle border: ├─┼─┼─┤ (Nushell style)
         border_parts = []
-        for i, w in enumerate(col_widths):
-            border_parts.append("─" * w)
-        middle_border = "├─" + "─┼─".join(border_parts) + "─┤"
+        for w in col_widths:
+            border_parts.append("─" * (w + 2))  # +2 for padding spaces
+        middle_border = "├" + "┼".join(border_parts) + "┤"
         result.append(Colors.colorize(middle_border, Colors.BRIGHT_BLACK))
         
-        # Render data rows
+        # Data rows: │ 0 │ .cargo │ ... │
         for row_idx, row in enumerate(indexed_rows):
             row_parts = []
             for i, cell in enumerate(row[:num_cols]):
-                cell_str = str(cell)
+                cell_str = str(cell) if i < len(row) else ""
                 if len(cell_str) > col_widths[i]:
                     cell_str = cell_str[:col_widths[i]]
                 
-                # Right-align numeric columns, left-align others
+                # Right-align numeric columns, left-align text
                 if is_numeric_col[i]:
                     cell_padded = cell_str.rjust(col_widths[i])
                 else:
                     cell_padded = cell_str.ljust(col_widths[i])
                 
+                # Color the cell
                 if i == 0:  # Index column - cyan
                     cell_colored = Colors.colorize(cell_padded, Colors.BRIGHT_CYAN)
                 else:
-                    # Alternating rows for readability
+                    # Alternating row colors for readability
                     if row_idx % 2 == 0:
                         cell_colored = cell_padded
                     else:
@@ -443,9 +447,9 @@ class BlockRenderer:
         
         # Bottom border: ╰─┴─┴─╯ (Nushell style)
         border_parts = []
-        for i, w in enumerate(col_widths):
-            border_parts.append("─" * w)
-        bottom_border = "╰─" + "─┴─".join(border_parts) + "─╯"
+        for w in col_widths:
+            border_parts.append("─" * (w + 2))  # +2 for padding spaces
+        bottom_border = "╰" + "┴".join(border_parts) + "╯"
         result.append(Colors.colorize(bottom_border, Colors.BRIGHT_BLACK))
         
         return result
