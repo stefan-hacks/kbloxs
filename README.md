@@ -1,4 +1,4 @@
-# Blocks Kitten (blx) - Nushell-like Block Output for Kitty Terminal
+# UNDER CONSTRUCTION - Blocks Kitten (blx) - Nushell-like Block Output for Kitty Terminal
 
 Transform any command's output into beautiful, structured blocks with automatic table formatting - just like Nushell!
 
