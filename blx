@@ -1,0 +1,38 @@
+#!/bin/bash
+# Wrapper script for blocks_kitten - allows using 'blx' instead of 'kitty +kitten blocks_kitten'
+
+# Check if we're in a kitty terminal and kitten is available
+if [ -n "$KITTY_PID" ] || [ -n "$KITTY_WINDOW_ID" ]; then
+    # In kitty, try to use the kitten
+    if kitty +kitten blocks_kitten --help >/dev/null 2>&1; then
+        exec kitty +kitten blocks_kitten "$@"
+    else
+        # Kitten not found, fall back to Python
+        KITTEN_DIR="${HOME}/.config/kitty/kittens/blocks_kitten"
+        if [ -f "${KITTEN_DIR}/main.py" ]; then
+            exec python3 "${KITTEN_DIR}/main.py" "$@"
+        else
+            echo "Error: blocks_kitten not found. Please run install.sh" >&2
+            exit 1
+        fi
+    fi
+else
+    # Not in kitty, run directly with Python
+    # Try to find blocks_kitten in common locations
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Check if blocks_kitten is in the same directory as this script (development)
+    if [ -f "${SCRIPT_DIR}/blocks_kitten/main.py" ]; then
+        exec python3 "${SCRIPT_DIR}/blocks_kitten/main.py" "$@"
+    # Check if installed in kitty kittens directory
+    elif [ -f "${HOME}/.config/kitty/kittens/blocks_kitten/main.py" ]; then
+        exec python3 "${HOME}/.config/kitty/kittens/blocks_kitten/main.py" "$@"
+    # Check system-wide location
+    elif [ -f "/usr/lib/kitty/kittens/blocks_kitten/main.py" ]; then
+        exec python3 "/usr/lib/kitty/kittens/blocks_kitten/main.py" "$@"
+    else
+        echo "Error: blocks_kitten not found. Please run install.sh" >&2
+        exit 1
+    fi
+fi
+
