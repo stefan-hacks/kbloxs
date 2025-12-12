@@ -20,6 +20,69 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from itertools import zip_longest
 
+# ANSI Color Codes for beautiful output
+class Colors:
+    """ANSI color codes for terminal output"""
+    # Reset
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    
+    # Text colors
+    BLACK = "\033[30m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    
+    # Bright colors
+    BRIGHT_BLACK = "\033[90m"
+    BRIGHT_RED = "\033[91m"
+    BRIGHT_GREEN = "\033[92m"
+    BRIGHT_YELLOW = "\033[93m"
+    BRIGHT_BLUE = "\033[94m"
+    BRIGHT_MAGENTA = "\033[95m"
+    BRIGHT_CYAN = "\033[96m"
+    BRIGHT_WHITE = "\033[97m"
+    
+    # Background colors
+    BG_BLACK = "\033[40m"
+    BG_RED = "\033[41m"
+    BG_GREEN = "\033[42m"
+    BG_YELLOW = "\033[43m"
+    BG_BLUE = "\033[44m"
+    BG_MAGENTA = "\033[45m"
+    BG_CYAN = "\033[46m"
+    BG_WHITE = "\033[47m"
+    
+    # Nushell-like color scheme
+    HEADER_BG = BG_BLUE
+    HEADER_FG = BRIGHT_WHITE
+    INDEX_COLOR = BRIGHT_CYAN
+    BORDER_COLOR = BRIGHT_BLACK
+    SUCCESS_COLOR = BRIGHT_GREEN
+    ERROR_COLOR = BRIGHT_RED
+    COMMAND_COLOR = BRIGHT_CYAN
+    SEPARATOR_COLOR = BRIGHT_BLACK
+    
+    @staticmethod
+    def colorize(text: str, color: str) -> str:
+        """Apply color to text"""
+        return f"{color}{text}{Colors.RESET}"
+    
+    @staticmethod
+    def bold(text: str) -> str:
+        """Make text bold"""
+        return f"{Colors.BOLD}{text}{Colors.RESET}"
+    
+    @staticmethod
+    def strip_ansi(text: str) -> str:
+        """Strip ANSI codes from text for length calculation"""
+        return re.sub(r'\033\[[0-9;]*m', '', text)
+
 # Import structured data operations
 try:
     from .structured_data import (
@@ -229,7 +292,7 @@ class TableDetector:
 
 
 class BlockRenderer:
-    """Renders blocks and tables in the terminal"""
+    """Renders blocks and tables in the terminal with Nushell-like styling"""
     
     def __init__(self, screen_width: int = 80):
         self.update_width(screen_width)
@@ -239,111 +302,207 @@ class BlockRenderer:
         self.screen_width = max(20, width)  # Minimum width
         
     def render_block(self, block: Block) -> str:
-        """Render a command block"""
+        """Render a command block with beautiful colors"""
         result = []
         width = self.screen_width - 2  # Account for borders
         
-        # Top border with rounded corners
-        result.append("╭" + "─" * width + "╮")
+        # Top border with rounded corners (colorized)
+        border = Colors.colorize("╭" + "─" * width + "╮", Colors.BORDER_COLOR)
+        result.append(border)
         
-        # Command line
+        # Command line (colorized)
         cmd_line = f"$ {block.command}"
         # Truncate if too long
         if len(cmd_line) > width:
             cmd_line = cmd_line[:width-3] + "..."
-        result.append(f"│ {cmd_line:<{width}}│")
+        cmd_colored = Colors.colorize(cmd_line, Colors.COMMAND_COLOR)
+        border_char = Colors.colorize("│", Colors.BORDER_COLOR)
+        # Calculate padding for command line (on plain text)
+        cmd_padding = width - len(cmd_line)
+        result.append(f"{border_char} {cmd_colored}{' ' * cmd_padding} {border_char}")
         
-        # Separator
-        result.append("├" + "─" * width + "┤")
+        # Separator (colorized)
+        separator = Colors.colorize("├" + "─" * width + "┤", Colors.SEPARATOR_COLOR)
+        result.append(separator)
         
         # Output
         if block.is_table and block.table_data and block.table_headers:
             table_lines = self.render_table(block.table_headers, block.table_data)
             for line in table_lines:
+                # Strip ANSI codes for width calculation
+                line_stripped = Colors.strip_ansi(line)
                 # Ensure line fits in width
-                if len(line) > width:
+                if len(line_stripped) > width:
+                    # Truncate while preserving ANSI codes (simplified - just truncate)
                     line = line[:width-3] + "..."
-                result.append(f"│ {line:<{width}}│")
+                border_char = Colors.colorize("│", Colors.BORDER_COLOR)
+                # Calculate padding
+                line_padding = width - len(line_stripped)
+                result.append(f"{border_char} {line}{' ' * line_padding} {border_char}")
         else:
             # Regular output
             output_lines = block.output.split('\n')
             for line in output_lines:
                 # Handle long lines by wrapping
                 while len(line) > width:
-                    result.append(f"│ {line[:width]:<{width}}│")
+                    border_char = Colors.colorize("│", Colors.BORDER_COLOR)
+                    result.append(f"{border_char} {line[:width]} {border_char}")
                     line = line[width:]
-                result.append(f"│ {line:<{width}}│")
+                if line:  # Only add non-empty lines
+                    border_char = Colors.colorize("│", Colors.BORDER_COLOR)
+                    line_padding = width - len(line)
+                    result.append(f"{border_char} {line}{' ' * line_padding} {border_char}")
         
-        # Status line
-        result.append("├" + "─" * width + "┤")
+        # Status line (colorized)
+        separator = Colors.colorize("├" + "─" * width + "┤", Colors.SEPARATOR_COLOR)
+        result.append(separator)
         status_symbol = "✓" if block.exit_code == 0 else "✗"
-        status_color = "\033[32m" if block.exit_code == 0 else "\033[31m"  # Green or Red
-        reset_color = "\033[0m"
+        status_color = Colors.SUCCESS_COLOR if block.exit_code == 0 else Colors.ERROR_COLOR
         status_text = "Success" if block.exit_code == 0 else f"Error (exit code: {block.exit_code})"
-        status_line = f"{status_color}{status_symbol}{reset_color} {status_text}"
-        result.append(f"│ {status_line:<{width}}│")
+        status_line = f"{Colors.colorize(status_symbol, status_color)} {status_text}"
+        border_char = Colors.colorize("│", Colors.BORDER_COLOR)
+        status_padding = width - len(status_line) + len(Colors.colorize(status_symbol, status_color)) - len(status_symbol)
+        # Recalculate without ANSI codes
+        status_stripped = Colors.strip_ansi(status_line)
+        status_padding = width - len(status_stripped)
+        result.append(f"{border_char} {status_line}{' ' * status_padding} {border_char}")
         
-        # Bottom border with rounded corners
-        result.append("╰" + "─" * width + "╯")
+        # Bottom border with rounded corners (colorized)
+        border = Colors.colorize("╰" + "─" * width + "╯", Colors.BORDER_COLOR)
+        result.append(border)
         
         return '\n'.join(result)
     
     def render_table(self, headers: List[str], rows: List[List[str]]) -> List[str]:
-        """Render a table with dynamic column widths"""
+        """Render a table with index column, dynamic widths, and beautiful colors (Nushell-style)"""
         if not headers or not rows:
             return []
         
-        num_cols = len(headers)
-        available_width = self.screen_width - 6  # Account for borders, padding, and separators
+        # Add index column (#) like Nushell
+        index_header = "#"
+        indexed_headers = [index_header] + headers
+        indexed_rows = [[str(i)] + row for i, row in enumerate(rows, start=0)]
+        
+        num_cols = len(indexed_headers)
+        # Account for borders (│ │), padding (spaces), and separators ( │ )
+        available_width = self.screen_width - 4  # 2 for borders, 2 for padding
         
         # Calculate column widths based on content
         col_widths = []
+        # Index column width (calculate max index number width)
+        max_index_width = max(len(str(len(rows) - 1)), len(index_header))
+        col_widths.append(max_index_width)
+        
+        # Header widths
         for header in headers:
             col_widths.append(len(str(header)))
         
         # Adjust based on data
-        for row in rows:
+        for row in indexed_rows:
             for i, cell in enumerate(row[:num_cols]):
                 if i < len(col_widths):
-                    col_widths[i] = max(col_widths[i], len(str(cell)))
+                    cell_len = len(str(cell))
+                    col_widths[i] = max(col_widths[i], cell_len)
         
-        # Calculate total width needed
-        total_width = sum(col_widths) + (len(col_widths) - 1) * 3  # 3 chars for " │ "
+        # Calculate total width needed (including separators)
+        # Format: " │ " between columns
+        separator_width = 3  # " │ "
+        total_width = sum(col_widths) + (len(col_widths) - 1) * separator_width
         
-        # If too wide, scale down proportionally
+        # If too wide, scale down proportionally (but preserve index column minimum)
         if total_width > available_width:
-            scale = available_width / total_width
-            col_widths = [max(int(w * scale), 3) for w in col_widths]
+            # Reserve minimum width for index column
+            index_min_width = max(col_widths[0], 3)
+            remaining_width = available_width - index_min_width - separator_width
+            other_cols_width = sum(col_widths[1:]) + (len(col_widths) - 2) * separator_width
             
-            # Recalculate to ensure we fit
-            total_width = sum(col_widths) + (len(col_widths) - 1) * 3
-            if total_width > available_width:
-                # If still too wide, make equal widths
-                equal_width = (available_width - (num_cols - 1) * 3) // num_cols
+            if other_cols_width > 0:
+                scale = remaining_width / other_cols_width
+                col_widths[0] = index_min_width
+                for i in range(1, len(col_widths)):
+                    col_widths[i] = max(int(col_widths[i] * scale), 3)
+            else:
+                # Fallback: equal widths
+                equal_width = (available_width - (num_cols - 1) * separator_width) // num_cols
                 col_widths = [max(equal_width, 3) for _ in range(num_cols)]
+                col_widths[0] = max(col_widths[0], max_index_width)  # Ensure index fits
         
         result = []
         
-        # Render header with styling
+        # Render header with beautiful styling (Nushell-like)
         header_parts = []
-        for i, header in enumerate(headers):
+        for i, header in enumerate(indexed_headers):
             if i < len(col_widths):
-                header_text = str(header)[:col_widths[i]]
-                header_parts.append(header_text.ljust(col_widths[i]))
-        result.append("\033[1m" + " │ ".join(header_parts) + "\033[0m")  # Bold headers
+                header_text = str(header)
+                # Truncate if needed (before colorizing)
+                if len(header_text) > col_widths[i]:
+                    header_text = header_text[:col_widths[i]]
+                
+                # Calculate padding needed (on plain text, before colorizing)
+                padding_needed = col_widths[i] - len(header_text)
+                
+                if i == 0:  # Index column
+                    # Colorize index column header
+                    header_colored = Colors.colorize(
+                        Colors.bold(header_text),
+                        Colors.INDEX_COLOR
+                    ) + " " * padding_needed
+                else:  # Regular headers
+                    # Colorize regular headers with background
+                    header_colored = Colors.colorize(
+                        Colors.bold(header_text),
+                        Colors.HEADER_FG + Colors.HEADER_BG
+                    ) + " " * padding_needed
+                header_parts.append(header_colored)
         
-        # Separator line
-        separator_parts = ["─" * w for w in col_widths]
-        result.append("─┼─".join(separator_parts))
+        separator_char = Colors.colorize("│", Colors.SEPARATOR_COLOR)
+        result.append(f" {separator_char} ".join(header_parts))
         
-        # Render rows
-        for row in rows:
+        # Separator line (colorized)
+        separator_parts = []
+        for i, w in enumerate(col_widths):
+            sep_line = "─" * w
+            if i == 0:
+                sep_colored = Colors.colorize(sep_line, Colors.INDEX_COLOR)
+            else:
+                sep_colored = Colors.colorize(sep_line, Colors.SEPARATOR_COLOR)
+            separator_parts.append(sep_colored)
+        separator_line = Colors.colorize("┼", Colors.SEPARATOR_COLOR)
+        result.append(separator_line.join(separator_parts))
+        
+        # Render rows with alternating colors and index column
+        for row_idx, row in enumerate(indexed_rows):
             row_parts = []
             for i, cell in enumerate(row[:num_cols]):
                 if i < len(col_widths):
-                    cell_str = str(cell)[:col_widths[i]]
-                    row_parts.append(cell_str.ljust(col_widths[i]))
-            result.append(" │ ".join(row_parts))
+                    cell_str = str(cell)
+                    # Truncate if needed (before colorizing)
+                    if len(cell_str) > col_widths[i]:
+                        cell_str = cell_str[:col_widths[i]]
+                    
+                    # Calculate padding needed (on plain text, before colorizing)
+                    padding_needed = col_widths[i] - len(cell_str)
+                    
+                    if i == 0:  # Index column
+                        # Colorize index column
+                        cell_colored = Colors.colorize(
+                            cell_str,
+                            Colors.INDEX_COLOR
+                        ) + " " * padding_needed
+                    else:
+                        # Regular cells - alternate row colors for readability
+                        if row_idx % 2 == 0:
+                            cell_colored = cell_str + " " * padding_needed
+                        else:
+                            # Slightly dimmed for alternating rows
+                            cell_colored = Colors.colorize(
+                                cell_str,
+                                Colors.DIM
+                            ) + " " * padding_needed
+                    row_parts.append(cell_colored)
+            
+            separator_char = Colors.colorize("│", Colors.SEPARATOR_COLOR)
+            result.append(f" {separator_char} ".join(row_parts))
         
         return result
 
@@ -479,7 +638,13 @@ def main(args: List[str] = None) -> None:
     if is_table:
         headers, rows = detector.parse_table(output)
         
+        # Store original headers/rows for index operations
+        original_headers = headers.copy()
+        original_rows = rows.copy()
+        
         # Apply operations (Nushell-like features)
+        # Note: Index column (#) will be added during rendering, but operations
+        # can reference columns by index (0-based) or by name
         if ops['select']:
             headers, rows = TableOperations.select_columns(headers, rows, ops['select'])
         
@@ -499,71 +664,181 @@ def main(args: List[str] = None) -> None:
         
         block.table_headers = headers
         block.table_data = rows
-        block.metadata = {'stats': stats, 'operations': ops} if stats else {'operations': ops}
+        block.metadata = {
+            'stats': stats, 
+            'operations': ops,
+            'original_headers': original_headers,
+            'original_rows': original_rows
+        } if stats else {
+            'operations': ops,
+            'original_headers': original_headers,
+            'original_rows': original_rows
+        }
     
     # Render block and print it
     renderer = BlockRenderer(screen_width)
     rendered = renderer.render_block(block)
     print(rendered)
     
-    # Print statistics if calculated
+    # Print statistics if calculated (colorized)
     if is_table and ops['stats'] and block.metadata and block.metadata.get('stats'):
         stats = block.metadata['stats']
-        print(f"\n📊 Statistics for column '{ops['stats']}':")
-        print(f"   Count: {stats['count']}")
-        print(f"   Sum: {stats['sum']:.2f}")
-        print(f"   Min: {stats['min']:.2f}")
-        print(f"   Max: {stats['max']:.2f}")
-        print(f"   Avg: {stats['avg']:.2f}")
+        stats_title = Colors.colorize(
+            f"\n📊 Statistics for column '{ops['stats']}':",
+            Colors.BOLD + Colors.BRIGHT_YELLOW
+        )
+        print(stats_title)
+        
+        stats_items = [
+            ("Count", stats['count'], Colors.BRIGHT_CYAN),
+            ("Sum", f"{stats['sum']:.2f}", Colors.BRIGHT_GREEN),
+            ("Min", f"{stats['min']:.2f}", Colors.BRIGHT_BLUE),
+            ("Max", f"{stats['max']:.2f}", Colors.BRIGHT_MAGENTA),
+            ("Avg", f"{stats['avg']:.2f}", Colors.BRIGHT_YELLOW),
+        ]
+        
+        for label, value, color in stats_items:
+            label_colored = Colors.colorize(f"   {label}:", Colors.BOLD + Colors.WHITE)
+            value_colored = Colors.colorize(str(value), color)
+            print(f"{label_colored} {value_colored}")
 
 
 def print_help():
-    """Print help message"""
-    help_text = """
-╔════════════════════════════════════════════════════════════════╗
-║              Blocks Kitten (blx) - Nushell-like                ║
-║              Structured Data Operations                        ║
-╚════════════════════════════════════════════════════════════════╝
-
-Usage:
-    blx <command> [command-args...] [operations...]
-
-Examples:
-    blx ls -la
-    blx ps aux --select USER,PID,COMMAND
-    blx ps aux --where USER=root --sort PID
-    blx df -h --where "Use%>80" --sort Use%
-    blx docker ps --limit 10
-
-Operations (Nushell-inspired):
-    --select, -s COLUMNS      Select specific columns
-                              Example: --select USER,PID,COMMAND
+    """Print beautiful colorized help message"""
+    # Title
+    title = Colors.colorize(
+        "╔════════════════════════════════════════════════════════════════╗\n"
+        "║              Blocks Kitten (blx) - Nushell-like                ║\n"
+        "║              Structured Data Operations                        ║\n"
+        "╚════════════════════════════════════════════════════════════════╝",
+        Colors.BRIGHT_CYAN
+    )
+    print(title)
+    print()
     
-    --where, -w CONDITION     Filter rows based on condition
-                              Operators: = != > < >= <= ~
-                              Example: --where USER=root
-                              Example: --where "PID>1000"
-                              Example: --where COMMAND~python
+    # Usage section
+    usage_title = Colors.colorize("Usage:", Colors.BOLD + Colors.BRIGHT_YELLOW)
+    usage_cmd = Colors.colorize("    blx <command> [command-args...] [operations...]", Colors.BRIGHT_WHITE)
+    print(f"{usage_title}\n{usage_cmd}\n")
     
-    --sort COLUMN             Sort by column (ascending)
-                              Example: --sort PID
+    # Examples section
+    examples_title = Colors.colorize("Examples:", Colors.BOLD + Colors.BRIGHT_YELLOW)
+    print(examples_title)
+    examples = [
+        ("    blx ls -la", Colors.BRIGHT_GREEN),
+        ("    blx ps aux --select USER,PID,COMMAND", Colors.BRIGHT_GREEN),
+        ("    blx ps aux --where USER=root --sort PID", Colors.BRIGHT_GREEN),
+        ("    blx df -h --where \"Use%>80\" --sort Use%", Colors.BRIGHT_GREEN),
+        ("    blx docker ps --limit 10", Colors.BRIGHT_GREEN),
+    ]
+    for example, color in examples:
+        print(Colors.colorize(example, color))
+    print()
     
-    --reverse, -r             Reverse sort order
+    # Operations section
+    ops_title = Colors.colorize("Operations (Nushell-inspired):", Colors.BOLD + Colors.BRIGHT_YELLOW)
+    print(ops_title)
     
-    --stats COLUMN            Show statistics for numeric column
-                              Example: --stats RSS
+    operations = [
+        {
+            "flag": "--select, -s COLUMNS",
+            "desc": "Select specific columns (supports column names or indices)",
+            "example": "--select USER,PID,COMMAND or --select 0,1,2",
+            "color": Colors.BRIGHT_CYAN
+        },
+        {
+            "flag": "--where, -w CONDITION",
+            "desc": "Filter rows based on condition",
+            "example": "--where USER=root or --where \"PID>1000\" or --where COMMAND~python",
+            "color": Colors.BRIGHT_CYAN
+        },
+        {
+            "flag": "--sort COLUMN",
+            "desc": "Sort by column (ascending)",
+            "example": "--sort PID or --sort 1 (by index)",
+            "color": Colors.BRIGHT_CYAN
+        },
+        {
+            "flag": "--reverse, -r",
+            "desc": "Reverse sort order",
+            "example": "--sort PID --reverse",
+            "color": Colors.BRIGHT_CYAN
+        },
+        {
+            "flag": "--stats COLUMN",
+            "desc": "Show statistics for numeric column",
+            "example": "--stats RSS or --stats 2 (by index)",
+            "color": Colors.BRIGHT_CYAN
+        },
+        {
+            "flag": "--limit, -n N",
+            "desc": "Limit number of rows shown",
+            "example": "--limit 10 or -n 5",
+            "color": Colors.BRIGHT_CYAN
+        },
+    ]
     
-    --limit, -n N             Limit number of rows shown
-                              Example: --limit 10
-
-Notes:
-    • All normal command flags/options work as usual
-    • Operations are applied after command execution
-    • Use -- to separate operations from command args if needed
-    • Column names are matched case-insensitively and partially
-
-    """
-    print(help_text)
+    for op in operations:
+        flag_colored = Colors.colorize(f"    {op['flag']}", Colors.BOLD + op['color'])
+        desc_colored = Colors.colorize(f"      {op['desc']}", Colors.WHITE)
+        example_colored = Colors.colorize(f"      Example: {op['example']}", Colors.DIM + Colors.BRIGHT_BLACK)
+        print(f"{flag_colored}\n{desc_colored}\n{example_colored}\n")
+    
+    # Operators section
+    operators_title = Colors.colorize("Where Operators:", Colors.BOLD + Colors.BRIGHT_YELLOW)
+    print(operators_title)
+    operators = [
+        ("    =", "Equals"),
+        ("    !=", "Not equals"),
+        ("    >", "Greater than (numeric)"),
+        ("    <", "Less than (numeric)"),
+        ("    >=", "Greater than or equal"),
+        ("    <=", "Less than or equal"),
+        ("    ~", "Pattern match (regex)"),
+    ]
+    for op, desc in operators:
+        op_colored = Colors.colorize(op, Colors.BRIGHT_MAGENTA)
+        desc_colored = Colors.colorize(desc, Colors.WHITE)
+        print(f"{op_colored}  {desc_colored}")
+    print()
+    
+    # Features section
+    features_title = Colors.colorize("Features:", Colors.BOLD + Colors.BRIGHT_YELLOW)
+    print(features_title)
+    features = [
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " Index column (#) for row referencing",
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " Beautiful colorized output",
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " Dynamic table formatting",
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " Column selection by name or index",
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " Row filtering with multiple operators",
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " Sorting and statistics",
+        Colors.colorize("    ✓", Colors.BRIGHT_GREEN) + " All command flags work as usual",
+    ]
+    for feature in features:
+        print(feature)
+    print()
+    
+    # Notes section
+    notes_title = Colors.colorize("Notes:", Colors.BOLD + Colors.BRIGHT_YELLOW)
+    print(notes_title)
+    notes = [
+        Colors.colorize("    •", Colors.BRIGHT_CYAN) + " All normal command flags/options work as usual",
+        Colors.colorize("    •", Colors.BRIGHT_CYAN) + " Operations are applied after command execution",
+        Colors.colorize("    •", Colors.BRIGHT_CYAN) + " Use -- to separate operations from command args if needed",
+        Colors.colorize("    •", Colors.BRIGHT_CYAN) + " Column names are matched case-insensitively and partially",
+        Colors.colorize("    •", Colors.BRIGHT_CYAN) + " Index column (#) allows referencing rows by number",
+        Colors.colorize("    •", Colors.BRIGHT_CYAN) + " Tables are automatically detected and formatted",
+    ]
+    for note in notes:
+        print(note)
+    print()
+    
+    # Footer
+    footer = Colors.colorize(
+        "For more information, visit: https://github.com/your-repo/kbloxs",
+        Colors.DIM + Colors.BRIGHT_BLACK
+    )
+    print(footer)
 
 
 def handle_result(args: List[str], answer: str, target_window_id: int, boss: Any) -> None:

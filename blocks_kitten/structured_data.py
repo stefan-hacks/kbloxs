@@ -107,7 +107,7 @@ class TableOperations:
     
     @staticmethod
     def select_columns(headers: List[str], rows: List[List[str]], columns: List[str]) -> Tuple[List[str], List[List[str]]]:
-        """Select specific columns from a table"""
+        """Select specific columns from a table (supports column names or 0-based indices)"""
         # Find column indices (avoid duplicates)
         selected_indices = []
         selected_headers = []
@@ -115,9 +115,12 @@ class TableOperations:
         
         for col in columns:
             col = col.strip()  # Remove whitespace
-            # Support column name or index
-            if col.isdigit():
+            # Support column name or index (0-based, like Nushell)
+            if col.isdigit() or (col.startswith('-') and col[1:].isdigit()):
                 idx = int(col)
+                # Support negative indices (from end)
+                if idx < 0:
+                    idx = len(headers) + idx
                 if 0 <= idx < len(headers) and idx not in used_indices:
                     selected_indices.append(idx)
                     selected_headers.append(headers[idx])
@@ -151,12 +154,14 @@ class TableOperations:
     
     @staticmethod
     def filter_rows(headers: List[str], rows: List[List[str]], condition: str) -> List[List[str]]:
-        """Filter rows based on a condition (column=value, column>value, etc.)"""
+        """Filter rows based on a condition (column=value, column>value, etc.)
+        Supports column names or 0-based indices"""
         if not condition:
             return rows
         
         # Parse condition (simple patterns)
         # Supports: column=value, column!=value, column>value, column<value, column~pattern
+        # Also supports: 0=value, 1>100, etc. (index-based)
         pattern = re.compile(r'(\w+)\s*(=|!=|>|<|>=|<=|~)\s*(.+)')
         match = pattern.match(condition.strip())
         if not match:
@@ -165,12 +170,21 @@ class TableOperations:
         col_name, op, value = match.groups()
         value = value.strip().strip('"').strip("'")
         
-        # Find column index
+        # Find column index (support name or numeric index)
         col_idx = -1
-        for i, h in enumerate(headers):
-            if col_name.lower() in h.lower():
-                col_idx = i
-                break
+        if col_name.isdigit() or (col_name.startswith('-') and col_name[1:].isdigit()):
+            # Numeric index
+            col_idx = int(col_name)
+            if col_idx < 0:
+                col_idx = len(headers) + col_idx
+            if not (0 <= col_idx < len(headers)):
+                col_idx = -1
+        else:
+            # Column name (case-insensitive partial match)
+            for i, h in enumerate(headers):
+                if col_name.lower() in h.lower():
+                    col_idx = i
+                    break
         
         if col_idx == -1:
             return rows
@@ -213,13 +227,22 @@ class TableOperations:
     
     @staticmethod
     def sort_rows(headers: List[str], rows: List[List[str]], column: str, reverse: bool = False) -> List[List[str]]:
-        """Sort rows by a column"""
-        # Find column index
+        """Sort rows by a column (supports column name or 0-based index)"""
+        # Find column index (support name or numeric index)
         col_idx = -1
-        for i, h in enumerate(headers):
-            if column.lower() in h.lower():
-                col_idx = i
-                break
+        if column.isdigit() or (column.startswith('-') and column[1:].isdigit()):
+            # Numeric index
+            col_idx = int(column)
+            if col_idx < 0:
+                col_idx = len(headers) + col_idx
+            if not (0 <= col_idx < len(headers)):
+                col_idx = -1
+        else:
+            # Column name (case-insensitive partial match)
+            for i, h in enumerate(headers):
+                if column.lower() in h.lower():
+                    col_idx = i
+                    break
         
         if col_idx == -1:
             return rows
@@ -239,12 +262,22 @@ class TableOperations:
     
     @staticmethod
     def get_column_stats(headers: List[str], rows: List[List[str]], column: str) -> Dict[str, Any]:
-        """Get statistics for a numeric column"""
+        """Get statistics for a numeric column (supports column name or 0-based index)"""
+        # Find column index (support name or numeric index)
         col_idx = -1
-        for i, h in enumerate(headers):
-            if column.lower() in h.lower():
-                col_idx = i
-                break
+        if column.isdigit() or (column.startswith('-') and column[1:].isdigit()):
+            # Numeric index
+            col_idx = int(column)
+            if col_idx < 0:
+                col_idx = len(headers) + col_idx
+            if not (0 <= col_idx < len(headers)):
+                col_idx = -1
+        else:
+            # Column name (case-insensitive partial match)
+            for i, h in enumerate(headers):
+                if column.lower() in h.lower():
+                    col_idx = i
+                    break
         
         if col_idx == -1:
             return {}
