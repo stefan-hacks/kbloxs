@@ -232,11 +232,11 @@ class TableDetector:
                             rows[-1][-1] += " " + cols[0]
             else:
                 # Single-space separated (like ps aux)
-                # Use first line as headers, split by single space
+                # Use first line as headers, split by whitespace
                 headers = lines[0].split()
                 start_idx = 1
                 
-                # For ps aux and similar, skip "total" line if present
+                # For ls -l and similar, skip "total" line if present
                 if start_idx < len(lines) and lines[start_idx].strip().lower().startswith('total'):
                     start_idx += 1
                 
@@ -244,35 +244,57 @@ class TableDetector:
                 # Determine expected column count from header
                 expected_cols = len(headers)
                 
+                # Debug: print headers to understand structure
+                # print(f"DEBUG: Headers ({len(headers)}): {headers}", file=sys.stderr)
+                
+                # Special handling for ps aux style output (last column is COMMAND which can have spaces)
+                # Split each line by whitespace, but merge last columns if needed
                 for line in lines[start_idx:]:
-                    # Split by single space, but handle quoted strings
-                    cols = []
-                    current_col = ""
-                    in_quotes = False
+                    # Split by whitespace
+                    parts = line.split()
                     
-                    for char in line:
-                        if char == '"' or char == "'":
-                            in_quotes = not in_quotes
-                            current_col += char
-                        elif char == ' ' and not in_quotes:
-                            if current_col:
-                                cols.append(current_col)
-                                current_col = ""
-                        else:
-                            current_col += char
-                    
-                    if current_col:
-                        cols.append(current_col)
-                    
-                    # If we got close to expected columns, use it
-                    if cols and abs(len(cols) - expected_cols) <= 2:
-                        # Pad or truncate to match header count
-                        if len(cols) < expected_cols:
-                            cols = cols + [''] * (expected_cols - len(cols))
-                        elif len(cols) > expected_cols:
-                            # Merge last columns if too many (command with spaces)
-                            cols = cols[:expected_cols-1] + [' '.join(cols[expected_cols-1:])]
+                    if len(parts) >= expected_cols:
+                        # If we have more parts than headers, merge the extra parts into the last column
+                        # For ps aux: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+                        # That's 11 columns, so merge everything after column 10 into COMMAND
+                        cols = parts[:expected_cols-1] + [' '.join(parts[expected_cols-1:])]
                         rows.append(cols)
+                    elif len(parts) == expected_cols:
+                        # Perfect match
+                        rows.append(parts)
+                    elif len(parts) > 0 and len(parts) >= expected_cols - 2:
+                        # Close enough - pad with empty strings
+                        cols = parts + [''] * (expected_cols - len(parts))
+                        rows.append(cols)
+                    else:
+                        # Fallback: simple split by space
+                        cols = []
+                        current_col = ""
+                        in_quotes = False
+                        
+                        for char in line:
+                            if char == '"' or char == "'":
+                                in_quotes = not in_quotes
+                                current_col += char
+                            elif char == ' ' and not in_quotes:
+                                if current_col:
+                                    cols.append(current_col)
+                                    current_col = ""
+                            else:
+                                current_col += char
+                        
+                        if current_col:
+                            cols.append(current_col)
+                        
+                        # If we got close to expected columns, use it
+                        if cols and abs(len(cols) - expected_cols) <= 2:
+                            # Pad or truncate to match header count
+                            if len(cols) < expected_cols:
+                                cols = cols + [''] * (expected_cols - len(cols))
+                            elif len(cols) > expected_cols:
+                                # Merge last columns if too many (command with spaces)
+                                cols = cols[:expected_cols-1] + [' '.join(cols[expected_cols-1:])]
+                            rows.append(cols)
         
         # Normalize column counts
         if headers:
@@ -387,6 +409,23 @@ class BlockRenderer:
         # Account for borders (│ │), padding (spaces), and separators ( │ )
         available_width = self.screen_width - 4  # 2 for borders, 2 for padding
         
+        # Detect numeric columns for right-alignment (like Nushell)
+        is_numeric_col = [False] * num_cols
+        is_numeric_col[0] = True  # Index column is always numeric
+        for col_idx in range(1, num_cols):
+            # Check if most values in this column are numeric
+            numeric_count = 0
+            total_count = 0
+            for row in indexed_rows:
+                if col_idx < len(row) and row[col_idx].strip():
+                    total_count += 1
+                    val = row[col_idx].strip()
+                    # Check if numeric (int, float, size with units like "2.6 kB")
+                    if val.replace('.', '').replace(',', '').replace('-', '').replace('+', '').replace('%', '').replace(' ', '').replace('kB', '').replace('MB', '').replace('GB', '').replace('B', '').replace('KiB', '').replace('MiB', '').replace('GiB', '').isdigit():
+                        numeric_count += 1
+            if total_count > 0 and numeric_count / total_count > 0.7:
+                is_numeric_col[col_idx] = True
+        
         # Calculate column widths based on content
         col_widths = []
         # Index column width (calculate max index number width)
@@ -429,7 +468,7 @@ class BlockRenderer:
         
         result = []
         
-        # Render header with beautiful styling (Nushell-like)
+        # Render header with beautiful styling (Nushell-like - no background, just colored bold text)
         header_parts = []
         for i, header in enumerate(indexed_headers):
             if i < len(col_widths):
@@ -438,39 +477,41 @@ class BlockRenderer:
                 if len(header_text) > col_widths[i]:
                     header_text = header_text[:col_widths[i]]
                 
-                # Calculate padding needed (on plain text, before colorizing)
-                padding_needed = col_widths[i] - len(header_text)
+                # Right-align numeric columns, left-align others
+                if is_numeric_col[i]:
+                    # Right-align
+                    header_padded = header_text.rjust(col_widths[i])
+                else:
+                    # Left-align
+                    header_padded = header_text.ljust(col_widths[i])
                 
                 if i == 0:  # Index column
-                    # Colorize index column header
+                    # Colorize index column header (green like Nushell)
                     header_colored = Colors.colorize(
-                        Colors.bold(header_text),
-                        Colors.INDEX_COLOR
-                    ) + " " * padding_needed
+                        Colors.bold(header_padded),
+                        Colors.BRIGHT_GREEN
+                    )
                 else:  # Regular headers
-                    # Colorize regular headers with background
+                    # Colorize regular headers (green like Nushell, no background)
                     header_colored = Colors.colorize(
-                        Colors.bold(header_text),
-                        Colors.HEADER_FG + Colors.HEADER_BG
-                    ) + " " * padding_needed
+                        Colors.bold(header_padded),
+                        Colors.BRIGHT_GREEN
+                    )
                 header_parts.append(header_colored)
         
-        separator_char = Colors.colorize("│", Colors.SEPARATOR_COLOR)
-        result.append(f" {separator_char} ".join(header_parts))
+        separator_char = Colors.colorize("│", Colors.BRIGHT_BLACK)
+        result.append(" " + f" {separator_char} ".join(header_parts) + " ")
         
-        # Separator line (colorized)
+        # Separator line (colorized) - Nushell style
         separator_parts = []
         for i, w in enumerate(col_widths):
             sep_line = "─" * w
-            if i == 0:
-                sep_colored = Colors.colorize(sep_line, Colors.INDEX_COLOR)
-            else:
-                sep_colored = Colors.colorize(sep_line, Colors.SEPARATOR_COLOR)
+            sep_colored = Colors.colorize(sep_line, Colors.BRIGHT_BLACK)
             separator_parts.append(sep_colored)
-        separator_line = Colors.colorize("┼", Colors.SEPARATOR_COLOR)
-        result.append(separator_line.join(separator_parts))
+        separator_char = Colors.colorize("┼", Colors.BRIGHT_BLACK)
+        result.append(" " + separator_char.join(separator_parts) + " ")
         
-        # Render rows with alternating colors and index column
+        # Render rows with proper alignment (like Nushell)
         for row_idx, row in enumerate(indexed_rows):
             row_parts = []
             for i, cell in enumerate(row[:num_cols]):
@@ -480,29 +521,29 @@ class BlockRenderer:
                     if len(cell_str) > col_widths[i]:
                         cell_str = cell_str[:col_widths[i]]
                     
-                    # Calculate padding needed (on plain text, before colorizing)
-                    padding_needed = col_widths[i] - len(cell_str)
+                    # Right-align numeric columns, left-align others (like Nushell)
+                    if is_numeric_col[i]:
+                        # Right-align
+                        cell_padded = cell_str.rjust(col_widths[i])
+                    else:
+                        # Left-align
+                        cell_padded = cell_str.ljust(col_widths[i])
                     
                     if i == 0:  # Index column
-                        # Colorize index column
-                        cell_colored = Colors.colorize(
-                            cell_str,
-                            Colors.INDEX_COLOR
-                        ) + " " * padding_needed
+                        # Colorize index column (cyan like Nushell)
+                        cell_colored = Colors.colorize(cell_padded, Colors.BRIGHT_CYAN)
                     else:
-                        # Regular cells - alternate row colors for readability
+                        # Regular cells - subtle alternating for readability
                         if row_idx % 2 == 0:
-                            cell_colored = cell_str + " " * padding_needed
+                            # Even rows - normal color
+                            cell_colored = cell_padded
                         else:
-                            # Slightly dimmed for alternating rows
-                            cell_colored = Colors.colorize(
-                                cell_str,
-                                Colors.DIM
-                            ) + " " * padding_needed
+                            # Odd rows - slightly dimmed
+                            cell_colored = Colors.colorize(cell_padded, Colors.DIM)
                     row_parts.append(cell_colored)
             
-            separator_char = Colors.colorize("│", Colors.SEPARATOR_COLOR)
-            result.append(f" {separator_char} ".join(row_parts))
+            separator_char = Colors.colorize("│", Colors.BRIGHT_BLACK)
+            result.append(" " + f" {separator_char} ".join(row_parts) + " ")
         
         return result
 
