@@ -324,79 +324,20 @@ class BlockRenderer:
         self.screen_width = max(20, width)  # Minimum width
         
     def render_block(self, block: Block) -> str:
-        """Render a command block with beautiful colors"""
+        """Render output in Nushell style (table only, no wrapper block)"""
         result = []
-        width = self.screen_width - 2  # Account for borders
         
-        # Top border with rounded corners (colorized)
-        border = Colors.colorize("╭" + "─" * width + "╮", Colors.BORDER_COLOR)
-        result.append(border)
-        
-        # Command line (colorized)
-        cmd_line = f"$ {block.command}"
-        # Truncate if too long
-        if len(cmd_line) > width:
-            cmd_line = cmd_line[:width-3] + "..."
-        cmd_colored = Colors.colorize(cmd_line, Colors.COMMAND_COLOR)
-        border_char = Colors.colorize("│", Colors.BORDER_COLOR)
-        # Calculate padding for command line (on plain text)
-        cmd_padding = width - len(cmd_line)
-        result.append(f"{border_char} {cmd_colored}{' ' * cmd_padding} {border_char}")
-        
-        # Separator (colorized)
-        separator = Colors.colorize("├" + "─" * width + "┤", Colors.SEPARATOR_COLOR)
-        result.append(separator)
-        
-        # Output
+        # Output directly in Nushell table format
         if block.is_table and block.table_data and block.table_headers:
+            # Render table in pure Nushell style
             table_lines = self.render_table(block.table_headers, block.table_data)
-            for line in table_lines:
-                # Strip ANSI codes for width calculation
-                line_stripped = Colors.strip_ansi(line)
-                # Ensure line fits in width
-                if len(line_stripped) > width:
-                    # Truncate while preserving ANSI codes (simplified - just truncate)
-                    line = line[:width-3] + "..."
-                border_char = Colors.colorize("│", Colors.BORDER_COLOR)
-                # Calculate padding
-                line_padding = width - len(line_stripped)
-                result.append(f"{border_char} {line}{' ' * line_padding} {border_char}")
+            return '\n'.join(table_lines)
         else:
-            # Regular output
-            output_lines = block.output.split('\n')
-            for line in output_lines:
-                # Handle long lines by wrapping
-                while len(line) > width:
-                    border_char = Colors.colorize("│", Colors.BORDER_COLOR)
-                    result.append(f"{border_char} {line[:width]} {border_char}")
-                    line = line[width:]
-                if line:  # Only add non-empty lines
-                    border_char = Colors.colorize("│", Colors.BORDER_COLOR)
-                    line_padding = width - len(line)
-                    result.append(f"{border_char} {line}{' ' * line_padding} {border_char}")
-        
-        # Status line (colorized)
-        separator = Colors.colorize("├" + "─" * width + "┤", Colors.SEPARATOR_COLOR)
-        result.append(separator)
-        status_symbol = "✓" if block.exit_code == 0 else "✗"
-        status_color = Colors.SUCCESS_COLOR if block.exit_code == 0 else Colors.ERROR_COLOR
-        status_text = "Success" if block.exit_code == 0 else f"Error (exit code: {block.exit_code})"
-        status_line = f"{Colors.colorize(status_symbol, status_color)} {status_text}"
-        border_char = Colors.colorize("│", Colors.BORDER_COLOR)
-        status_padding = width - len(status_line) + len(Colors.colorize(status_symbol, status_color)) - len(status_symbol)
-        # Recalculate without ANSI codes
-        status_stripped = Colors.strip_ansi(status_line)
-        status_padding = width - len(status_stripped)
-        result.append(f"{border_char} {status_line}{' ' * status_padding} {border_char}")
-        
-        # Bottom border with rounded corners (colorized)
-        border = Colors.colorize("╰" + "─" * width + "╯", Colors.BORDER_COLOR)
-        result.append(border)
-        
-        return '\n'.join(result)
+            # For non-table output, just return the output as-is
+            return block.output
     
     def render_table(self, headers: List[str], rows: List[List[str]]) -> List[str]:
-        """Render a table with index column, dynamic widths, and beautiful colors (Nushell-style)"""
+        """Render a table in pure Nushell format with exact box-drawing characters"""
         if not headers or not rows:
             return []
         
@@ -406,12 +347,10 @@ class BlockRenderer:
         indexed_rows = [[str(i)] + row for i, row in enumerate(rows, start=0)]
         
         num_cols = len(indexed_headers)
-        # Account for borders (│ │), padding (spaces), and separators ( │ )
-        available_width = self.screen_width - 4  # 2 for borders, 2 for padding
         
         # Detect numeric columns for right-alignment (like Nushell)
         is_numeric_col = [False] * num_cols
-        is_numeric_col[0] = True  # Index column is always numeric
+        is_numeric_col[0] = True  # Index column is always numeric and right-aligned
         for col_idx in range(1, num_cols):
             # Check if most values in this column are numeric
             numeric_count = 0
@@ -420,130 +359,94 @@ class BlockRenderer:
                 if col_idx < len(row) and row[col_idx].strip():
                     total_count += 1
                     val = row[col_idx].strip()
-                    # Check if numeric (int, float, size with units like "2.6 kB")
-                    if val.replace('.', '').replace(',', '').replace('-', '').replace('+', '').replace('%', '').replace(' ', '').replace('kB', '').replace('MB', '').replace('GB', '').replace('B', '').replace('KiB', '').replace('MiB', '').replace('GiB', '').isdigit():
+                    # Check if numeric (int, float, size with units, percentages)
+                    test_val = val.replace('.', '').replace(',', '').replace('-', '').replace('+', '').replace('%', '').replace(' ', '')
+                    for unit in ['kB', 'MB', 'GB', 'TB', 'B', 'KiB', 'MiB', 'GiB', 'TiB']:
+                        test_val = test_val.replace(unit, '')
+                    if test_val.isdigit():
                         numeric_count += 1
             if total_count > 0 and numeric_count / total_count > 0.7:
                 is_numeric_col[col_idx] = True
         
-        # Calculate column widths based on content
+        # Calculate column widths based on content (minimum 1 space padding on each side)
         col_widths = []
-        # Index column width (calculate max index number width)
-        max_index_width = max(len(str(len(rows) - 1)), len(index_header))
-        col_widths.append(max_index_width)
-        
-        # Header widths
-        for header in headers:
-            col_widths.append(len(str(header)))
-        
-        # Adjust based on data
-        for row in indexed_rows:
-            for i, cell in enumerate(row[:num_cols]):
-                if i < len(col_widths):
-                    cell_len = len(str(cell))
-                    col_widths[i] = max(col_widths[i], cell_len)
-        
-        # Calculate total width needed (including separators)
-        # Format: " │ " between columns
-        separator_width = 3  # " │ "
-        total_width = sum(col_widths) + (len(col_widths) - 1) * separator_width
-        
-        # If too wide, scale down proportionally (but preserve index column minimum)
-        if total_width > available_width:
-            # Reserve minimum width for index column
-            index_min_width = max(col_widths[0], 3)
-            remaining_width = available_width - index_min_width - separator_width
-            other_cols_width = sum(col_widths[1:]) + (len(col_widths) - 2) * separator_width
-            
-            if other_cols_width > 0:
-                scale = remaining_width / other_cols_width
-                col_widths[0] = index_min_width
-                for i in range(1, len(col_widths)):
-                    col_widths[i] = max(int(col_widths[i] * scale), 3)
-            else:
-                # Fallback: equal widths
-                equal_width = (available_width - (num_cols - 1) * separator_width) // num_cols
-                col_widths = [max(equal_width, 3) for _ in range(num_cols)]
-                col_widths[0] = max(col_widths[0], max_index_width)  # Ensure index fits
+        for col_idx in range(num_cols):
+            max_width = len(indexed_headers[col_idx])
+            for row in indexed_rows:
+                if col_idx < len(row):
+                    max_width = max(max_width, len(str(row[col_idx])))
+            col_widths.append(max_width)
         
         result = []
         
-        # Render header with beautiful styling (Nushell-like - no background, just colored bold text)
+        # Top border: ╭─┬─┬─╮ (Nushell style)
+        border_parts = []
+        for i, w in enumerate(col_widths):
+            border_parts.append("─" * w)
+        top_border = "╭─" + "─┬─".join(border_parts) + "─╮"
+        result.append(Colors.colorize(top_border, Colors.BRIGHT_BLACK))
+        
+        # Render header row (Nushell style: green bold)
         header_parts = []
         for i, header in enumerate(indexed_headers):
-            if i < len(col_widths):
-                header_text = str(header)
-                # Truncate if needed (before colorizing)
-                if len(header_text) > col_widths[i]:
-                    header_text = header_text[:col_widths[i]]
-                
-                # Right-align numeric columns, left-align others
-                if is_numeric_col[i]:
-                    # Right-align
-                    header_padded = header_text.rjust(col_widths[i])
-                else:
-                    # Left-align
-                    header_padded = header_text.ljust(col_widths[i])
-                
-                if i == 0:  # Index column
-                    # Colorize index column header (green like Nushell)
-                    header_colored = Colors.colorize(
-                        Colors.bold(header_padded),
-                        Colors.BRIGHT_GREEN
-                    )
-                else:  # Regular headers
-                    # Colorize regular headers (green like Nushell, no background)
-                    header_colored = Colors.colorize(
-                        Colors.bold(header_padded),
-                        Colors.BRIGHT_GREEN
-                    )
-                header_parts.append(header_colored)
+            header_text = str(header)
+            if len(header_text) > col_widths[i]:
+                header_text = header_text[:col_widths[i]]
+            
+            # Right-align numeric columns, left-align others
+            if is_numeric_col[i]:
+                header_padded = header_text.rjust(col_widths[i])
+            else:
+                header_padded = header_text.ljust(col_widths[i])
+            
+            # Green bold headers (like Nushell)
+            header_colored = Colors.colorize(Colors.bold(header_padded), Colors.BRIGHT_GREEN)
+            header_parts.append(header_colored)
         
-        separator_char = Colors.colorize("│", Colors.BRIGHT_BLACK)
-        result.append(" " + f" {separator_char} ".join(header_parts) + " ")
+        border_char = Colors.colorize("│", Colors.BRIGHT_BLACK)
+        result.append(f"{border_char} " + f" {border_char} ".join(header_parts) + f" {border_char}")
         
-        # Separator line (colorized) - Nushell style
-        separator_parts = []
+        # Middle border: ├─┼─┼─┤ (Nushell style)
+        border_parts = []
         for i, w in enumerate(col_widths):
-            sep_line = "─" * w
-            sep_colored = Colors.colorize(sep_line, Colors.BRIGHT_BLACK)
-            separator_parts.append(sep_colored)
-        separator_char = Colors.colorize("┼", Colors.BRIGHT_BLACK)
-        result.append(" " + separator_char.join(separator_parts) + " ")
+            border_parts.append("─" * w)
+        middle_border = "├─" + "─┼─".join(border_parts) + "─┤"
+        result.append(Colors.colorize(middle_border, Colors.BRIGHT_BLACK))
         
-        # Render rows with proper alignment (like Nushell)
+        # Render data rows
         for row_idx, row in enumerate(indexed_rows):
             row_parts = []
             for i, cell in enumerate(row[:num_cols]):
-                if i < len(col_widths):
-                    cell_str = str(cell)
-                    # Truncate if needed (before colorizing)
-                    if len(cell_str) > col_widths[i]:
-                        cell_str = cell_str[:col_widths[i]]
-                    
-                    # Right-align numeric columns, left-align others (like Nushell)
-                    if is_numeric_col[i]:
-                        # Right-align
-                        cell_padded = cell_str.rjust(col_widths[i])
+                cell_str = str(cell)
+                if len(cell_str) > col_widths[i]:
+                    cell_str = cell_str[:col_widths[i]]
+                
+                # Right-align numeric columns, left-align others
+                if is_numeric_col[i]:
+                    cell_padded = cell_str.rjust(col_widths[i])
+                else:
+                    cell_padded = cell_str.ljust(col_widths[i])
+                
+                if i == 0:  # Index column - cyan
+                    cell_colored = Colors.colorize(cell_padded, Colors.BRIGHT_CYAN)
+                else:
+                    # Alternating rows for readability
+                    if row_idx % 2 == 0:
+                        cell_colored = cell_padded
                     else:
-                        # Left-align
-                        cell_padded = cell_str.ljust(col_widths[i])
-                    
-                    if i == 0:  # Index column
-                        # Colorize index column (cyan like Nushell)
-                        cell_colored = Colors.colorize(cell_padded, Colors.BRIGHT_CYAN)
-                    else:
-                        # Regular cells - subtle alternating for readability
-                        if row_idx % 2 == 0:
-                            # Even rows - normal color
-                            cell_colored = cell_padded
-                        else:
-                            # Odd rows - slightly dimmed
-                            cell_colored = Colors.colorize(cell_padded, Colors.DIM)
-                    row_parts.append(cell_colored)
+                        cell_colored = Colors.colorize(cell_padded, Colors.DIM)
+                
+                row_parts.append(cell_colored)
             
-            separator_char = Colors.colorize("│", Colors.BRIGHT_BLACK)
-            result.append(" " + f" {separator_char} ".join(row_parts) + " ")
+            border_char = Colors.colorize("│", Colors.BRIGHT_BLACK)
+            result.append(f"{border_char} " + f" {border_char} ".join(row_parts) + f" {border_char}")
+        
+        # Bottom border: ╰─┴─┴─╯ (Nushell style)
+        border_parts = []
+        for i, w in enumerate(col_widths):
+            border_parts.append("─" * w)
+        bottom_border = "╰─" + "─┴─".join(border_parts) + "─╯"
+        result.append(Colors.colorize(bottom_border, Colors.BRIGHT_BLACK))
         
         return result
 
